@@ -16,12 +16,27 @@ st.title("✍️ 네이버 블로그 자동화")
 # ---------------------------------------------------------------- 사이드바
 with st.sidebar:
     st.header("설정")
-    api_key = st.text_input(
-        "Anthropic API 키",
-        type="password",
-        value=os.environ.get("ANTHROPIC_API_KEY", ""),
-        help="서버에 ANTHROPIC_API_KEY 환경변수가 있으면 비워둬도 됩니다.",
+    provider_label = st.radio(
+        "AI 선택",
+        ["Gemini (무료 사용 가능)", "Claude (품질 우수, 유료)"],
+        help="Gemini: aistudio.google.com 에서 카드 등록 없이 무료 키 발급. "
+        "Claude: console.anthropic.com 에서 충전식 유료 키 발급.",
     )
+    provider = "gemini" if provider_label.startswith("Gemini") else "claude"
+    if provider == "gemini":
+        api_key = st.text_input(
+            "Gemini API 키",
+            type="password",
+            value=os.environ.get("GEMINI_API_KEY", ""),
+            help="aistudio.google.com → Get API key 에서 무료 발급",
+        )
+    else:
+        api_key = st.text_input(
+            "Anthropic API 키",
+            type="password",
+            value=os.environ.get("ANTHROPIC_API_KEY", ""),
+            help="서버에 ANTHROPIC_API_KEY 환경변수가 있으면 비워둬도 됩니다.",
+        )
 
     profiles = style_store.list_profiles()
     profile_name = st.selectbox(
@@ -60,7 +75,8 @@ with tab_write:
             if profile_name != "(사용 안 함)":
                 samples = style_store.load_profile(profile_name)["samples"]
             try:
-                with st.status("Claude가 글을 작성하는 중...", expanded=True):
+                ai_name = "Gemini" if provider == "gemini" else "Claude"
+                with st.status(f"{ai_name}가 글을 작성하는 중...", expanded=True):
                     placeholder = st.empty()
                     chunks: list[str] = []
                     for chunk in generator.stream_post(
@@ -69,6 +85,7 @@ with tab_write:
                         style_samples=samples,
                         extra=extra,
                         api_key=api_key or None,
+                        provider=provider,
                     ):
                         chunks.append(chunk)
                         placeholder.markdown("".join(chunks))

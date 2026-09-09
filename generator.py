@@ -1,13 +1,18 @@
-"""Claude API 기반 블로그 글 생성."""
+"""블로그 글 생성 (Claude 또는 Gemini API)."""
 
 import re
 from typing import Iterator
 
 import anthropic
+import requests
 
 from seo_guide import NAVER_SEO_GUIDE, OUTPUT_FORMAT_GUIDE
 
 MODEL = "claude-opus-5"
+GEMINI_MODEL = "gemini-2.5-flash"  # 무료 사용량 제공 모델
+GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
 
 BASE_SYSTEM = f"""당신은 네이버 블로그 전문 작가입니다.
 사용자가 준 키워드와 희망 내용으로 네이버 검색 상위노출에 최적화된 블로그 글을 작성합니다.
@@ -29,20 +34,23 @@ STYLE_SYSTEM_TEMPLATE = """
 """.strip()
 
 
-def _build_system(style_samples: list[str] | None) -> list[dict] | str:
+def _style_text(style_samples: list[str] | None) -> str | None:
     if not style_samples:
-        return BASE_SYSTEM
+        return None
     joined = "\n\n".join(
         f"### 기존 글 {i + 1}\n{s}" for i, s in enumerate(style_samples)
     )
+    return STYLE_SYSTEM_TEMPLATE.format(samples=joined)
+
+
+def _build_system(style_samples: list[str] | None) -> list[dict] | str:
+    style = _style_text(style_samples)
+    if not style:
+        return BASE_SYSTEM
     # 스타일 샘플은 요청마다 동일하므로 프롬프트 캐싱으로 비용 절감
     return [
         {"type": "text", "text": BASE_SYSTEM},
-        {
-            "type": "text",
-            "text": STYLE_SYSTEM_TEMPLATE.format(samples=joined),
-            "cache_control": {"type": "ephemeral"},
-        },
+        {"type": "text", "text": style, "cache_control": {"type": "ephemeral"}},
     ]
 
 
@@ -63,8 +71,16 @@ def stream_post(
     style_samples: list[str] | None = None,
     extra: str = "",
     api_key: str | None = None,
+    provider: str = "claude",
 ) -> Iterator[str]:
-    """글을 스트리밍으로 생성한다. 텍스트 조각을 순서대로 yield."""
+    """글을 생성한다. 텍스트 조각을 순서대로 yield.
+
+    provider: "claude" (품질 우수, 유료) 또는 "gemini" (무료 사용량 제공).
+    """
+    if provider == "gemini":
+        yield _gemini_generate(keyword, brief, style_samples, extra, api_key)
+        return
+
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
     with client.messages.stream(
         model=MODEL,
@@ -77,6 +93,56 @@ def stream_post(
         if final.stop_reason == "refusal":
             detail = final.stop_details.explanation if final.stop_details else ""
             raise RuntimeError(f"모델이 요청을 거절했습니다: {detail}")
+
+
+def _gemini_generate(
+    keyword: str,
+    brief: str,
+    style_samples: list[str] | None,
+    extra: str,
+    api_key: str | None,
+) -> str:
+    """Google Gemini API로 글 생성 (무료 사용량 제공, aistudio.google.com에서 키 발급)."""
+    if not api_key:
+        raise RuntimeError(
+            "Gemini API 키가 필요합니다. aistudio.google.com 에서 무료로 발급받아 "
+            "사이드바에 입력해 주세요."
+        )
+    system = BASE_SYSTEM
+    style = _style_text(style_samples)
+    if style:
+        system = f"{system}\n\n{style}"
+
+    resp = requests.post(
+        GEMINI_URL.format(model=GEMINI_MODEL),
+        params={"key": api_key},
+        json={
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": _build_user_prompt(keyword, brief, extra)}],
+                }
+            ],
+            "generationConfig": {"maxOutputTokens": 8192},
+        },
+        timeout=300,
+    )
+    if resp.status_code == 429:
+        raise RuntimeError(
+            "Gemini 무료 사용량을 초과했습니다. 잠시 후(또는 내일) 다시 시도하거나 "
+            "Claude로 전환해 주세요."
+        )
+    if resp.status_code != 200:
+        detail = resp.json().get("error", {}).get("message", resp.text[:300])
+        raise RuntimeError(f"Gemini API 오류 ({resp.status_code}): {detail}")
+
+    data = resp.json()
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+    except (KeyError, IndexError):
+        raise RuntimeError(f"Gemini 응답을 해석할 수 없습니다: {str(data)[:300]}")
+    return "".join(p.get("text", "") for p in parts)
 
 
 def parse_post(raw: str) -> dict:
