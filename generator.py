@@ -1,6 +1,7 @@
 """블로그 글 생성 (Claude 또는 Gemini API)."""
 
 import re
+import time
 from typing import Iterator
 
 import anthropic
@@ -127,14 +128,25 @@ def _gemini_generate(
 
     resp = None
     for model in GEMINI_MODELS:
-        resp = requests.post(
-            GEMINI_URL.format(model=model),
-            params={"key": api_key},
-            json=payload,
-            timeout=300,
-        )
-        if resp.status_code != 404:  # 404 = 이 모델명은 더 이상 사용 불가 → 다음 후보
+        # 503(서버 혼잡)은 잠시 기다렸다 같은 모델로 재시도
+        for _ in range(3):
+            resp = requests.post(
+                GEMINI_URL.format(model=model),
+                params={"key": api_key},
+                json=payload,
+                timeout=300,
+            )
+            if resp.status_code != 503:
+                break
+            time.sleep(5)
+        if resp.status_code == 404:  # 404 = 이 모델명은 사용 불가 → 다음 후보
+            continue
+        if resp.status_code != 503:  # 503이 계속되면 다음 후보 모델로
             break
+    if resp.status_code == 503:
+        raise RuntimeError(
+            "지금 구글 무료 서버가 혼잡합니다. 1~2분 뒤에 '글 생성하기'를 다시 눌러 주세요."
+        )
     if resp.status_code == 429:
         raise RuntimeError(
             "Gemini 무료 사용량을 초과했습니다. 잠시 후(또는 내일) 다시 시도하거나 "
