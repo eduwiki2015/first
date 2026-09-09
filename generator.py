@@ -9,7 +9,8 @@ import requests
 from seo_guide import NAVER_SEO_GUIDE, OUTPUT_FORMAT_GUIDE
 
 MODEL = "claude-opus-5"
-GEMINI_MODEL = "gemini-2.5-flash"  # 무료 사용량 제공 모델
+# 무료 사용량 제공 모델 후보. 구글이 모델명을 바꾸면 앞의 것부터 순서대로 시도한다.
+GEMINI_MODELS = ["gemini-3.6-flash", "gemini-3-flash-preview", "gemini-2.5-flash"]
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
@@ -113,21 +114,27 @@ def _gemini_generate(
     if style:
         system = f"{system}\n\n{style}"
 
-    resp = requests.post(
-        GEMINI_URL.format(model=GEMINI_MODEL),
-        params={"key": api_key},
-        json={
-            "systemInstruction": {"parts": [{"text": system}]},
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": _build_user_prompt(keyword, brief, extra)}],
-                }
-            ],
-            "generationConfig": {"maxOutputTokens": 8192},
-        },
-        timeout=300,
-    )
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": _build_user_prompt(keyword, brief, extra)}],
+            }
+        ],
+        "generationConfig": {"maxOutputTokens": 8192},
+    }
+
+    resp = None
+    for model in GEMINI_MODELS:
+        resp = requests.post(
+            GEMINI_URL.format(model=model),
+            params={"key": api_key},
+            json=payload,
+            timeout=300,
+        )
+        if resp.status_code != 404:  # 404 = 이 모델명은 더 이상 사용 불가 → 다음 후보
+            break
     if resp.status_code == 429:
         raise RuntimeError(
             "Gemini 무료 사용량을 초과했습니다. 잠시 후(또는 내일) 다시 시도하거나 "
