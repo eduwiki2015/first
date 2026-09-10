@@ -52,7 +52,9 @@ with st.sidebar:
         "사용하세요. 가장 안전한 방법은 '복사해서 직접 붙여넣기'입니다."
     )
 
-tab_write, tab_style, tab_publish = st.tabs(["📝 글 생성", "🎨 말투 학습", "🚀 네이버 발행"])
+tab_write, tab_image, tab_style, tab_publish = st.tabs(
+    ["📝 글 생성", "🖼️ 이미지 생성", "🎨 말투 학습", "🚀 네이버 발행"]
+)
 
 # ---------------------------------------------------------------- 글 생성
 with tab_write:
@@ -123,6 +125,55 @@ with tab_write:
         full_text = f"{post['title']}\n\n{post['body']}\n\n태그: {', '.join('#' + t for t in post['tags'])}"
         st.download_button("📄 텍스트 파일로 저장", full_text, file_name="blog_post.txt", use_container_width=True)
 
+# ---------------------------------------------------------------- 이미지 생성
+with tab_image:
+    import re as _re
+
+    st.markdown("이미지는 **Gemini**로 생성합니다. (무료 사용량 일부 포함)")
+    default_img_key = api_key if provider == "gemini" else os.environ.get("GEMINI_API_KEY", "")
+    img_key = st.text_input(
+        "Gemini API 키 (이미지용)",
+        type="password",
+        value=default_img_key,
+        help="글 생성용 Gemini 키와 동일합니다. Claude를 선택했다면 여기에 Gemini 키를 따로 입력하세요.",
+    )
+
+    # 생성한 글에 들어 있는 [이미지: 설명] 을 자동으로 추천
+    suggestions = []
+    if "post" in st.session_state:
+        suggestions = _re.findall(r"\[이미지:\s*(.+?)\]", st.session_state["post"]["body"])
+    if suggestions:
+        pick = st.selectbox("생성한 글에서 찾은 이미지 설명 (선택해서 넣기)", ["(직접 입력)"] + suggestions)
+    else:
+        pick = "(직접 입력)"
+
+    img_prompt = st.text_input(
+        "만들 이미지 설명",
+        value="" if pick == "(직접 입력)" else pick,
+        placeholder="예: 파스타가 담긴 접시, 아늑한 레스토랑 분위기, 밝은 조명",
+    )
+
+    if st.button("이미지 생성하기", type="primary", use_container_width=True):
+        if not img_prompt.strip():
+            st.error("이미지 설명을 입력해 주세요.")
+        else:
+            import imagegen
+
+            try:
+                with st.spinner("이미지를 만드는 중... (10~30초)"):
+                    img_bytes = imagegen.generate_image(img_prompt, img_key or None)
+                st.image(img_bytes, caption=img_prompt)
+                st.download_button(
+                    "🖼️ 이미지 저장 (PNG)",
+                    img_bytes,
+                    file_name="image.png",
+                    mime="image/png",
+                    use_container_width=True,
+                )
+                st.caption("저장한 이미지를 네이버 에디터에서 직접 첨부하시면 됩니다.")
+            except Exception as e:
+                st.error(f"이미지 생성 실패: {e}")
+
 # ---------------------------------------------------------------- 말투 학습
 with tab_style:
     st.markdown(
@@ -132,7 +183,37 @@ with tab_style:
     )
     new_name = st.text_input("프로필 이름", placeholder="예: 회사 공식 블로그 말투")
     description = st.text_input("설명 (선택)")
-    n = st.number_input("샘플 글 개수", min_value=1, max_value=5, value=2)
+
+    # 링크에서 원고 자동 가져오기 (네이버 블로그 공개글 등)
+    st.session_state.setdefault("url_samples", [])
+    with st.expander("🔗 링크에서 원고 가져오기 (직접 붙여넣기 대신)"):
+        st.caption(
+            "네이버 블로그/카페 글의 링크를 넣으면 본문을 자동으로 읽어옵니다. "
+            "비공개·회원전용 글은 실패할 수 있어요 (그럴 땐 아래에 직접 붙여넣기)."
+        )
+        url = st.text_input("글 링크 (주소)", placeholder="https://blog.naver.com/...")
+        if st.button("이 링크에서 원고 가져오기"):
+            if not url.strip():
+                st.error("링크를 입력해 주세요.")
+            else:
+                import extractor
+
+                try:
+                    with st.spinner("원고를 읽어오는 중... (10~20초)"):
+                        text = extractor.extract_text_from_url(url)
+                    st.session_state["url_samples"].append(text)
+                    st.success("원고를 가져왔습니다! 아래 목록에 추가됐어요.")
+                except Exception as e:
+                    st.error(f"가져오기 실패: {e}")
+        if st.session_state["url_samples"]:
+            st.markdown("**가져온 원고 목록** (프로필 저장 시 함께 포함됩니다)")
+            for i, s in enumerate(st.session_state["url_samples"]):
+                st.text(f"[{i + 1}] {s[:150]}{'...' if len(s) > 150 else ''}")
+            if st.button("가져온 원고 목록 비우기"):
+                st.session_state["url_samples"] = []
+                st.rerun()
+
+    n = st.number_input("직접 붙여넣을 샘플 개수", min_value=0, max_value=5, value=2)
     samples_input = [
         st.text_area(f"기존 글 {i + 1}", height=150, key=f"sample_{i}") for i in range(int(n))
     ]
@@ -140,11 +221,12 @@ with tab_style:
     col_save, col_del = st.columns(2)
     with col_save:
         if st.button("프로필 저장", type="primary", use_container_width=True):
-            valid = [s for s in samples_input if s.strip()]
+            valid = [s for s in samples_input if s.strip()] + st.session_state["url_samples"]
             if not new_name.strip() or not valid:
-                st.error("프로필 이름과 샘플 글을 1개 이상 입력해 주세요.")
+                st.error("프로필 이름과 샘플 글(직접 입력 또는 링크)을 1개 이상 넣어 주세요.")
             else:
                 style_store.save_profile(new_name, valid, description)
+                st.session_state["url_samples"] = []
                 st.success(f"'{new_name}' 프로필 저장 완료. 사이드바에서 선택하세요.")
                 st.rerun()
     with col_del:
