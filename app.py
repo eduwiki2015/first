@@ -56,11 +56,22 @@ tab_write, tab_style, tab_publish = st.tabs(["📝 글 생성", "🎨 말투 학
 
 # ---------------------------------------------------------------- 글 생성
 with tab_write:
-    col1, col2 = st.columns(2)
-    with col1:
-        keyword = st.text_input("핵심 키워드 (상위노출 목표 키워드)", placeholder="예: 강남 맛집")
-    with col2:
-        extra = st.text_input("추가 요청사항 (선택)", placeholder="예: 존댓말로, 이모티콘 없이")
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        content_label = st.radio("글 종류", ["블로그 글", "카페 글"], horizontal=True)
+        content_type = "cafe" if content_label == "카페 글" else "blog"
+    with c2:
+        keyword = st.text_input("핵심 키워드 (상위노출 목표)", placeholder="예: 강남 맛집")
+    with c3:
+        target_chars = st.number_input(
+            "목표 글자수 (한글 기준)",
+            min_value=0,
+            max_value=5000,
+            value=0,
+            step=100,
+            help="0으로 두면 글 종류별 권장 분량으로 자동 작성합니다. (예: 2000)",
+        )
+    extra = st.text_input("추가 요청사항 (선택)", placeholder="예: 존댓말로, 이모티콘 없이")
     brief = st.text_area(
         "글에 담고 싶은 내용",
         height=180,
@@ -86,6 +97,8 @@ with tab_write:
                         extra=extra,
                         api_key=api_key or None,
                         provider=provider,
+                        content_type=content_type,
+                        target_chars=int(target_chars) or None,
                     ):
                         chunks.append(chunk)
                         placeholder.markdown("".join(chunks))

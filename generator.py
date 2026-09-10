@@ -8,7 +8,7 @@ from typing import Iterator
 import anthropic
 import requests
 
-from seo_guide import NAVER_SEO_GUIDE, OUTPUT_FORMAT_GUIDE
+from seo_guide import get_guide, OUTPUT_FORMAT_GUIDE
 
 MODEL = "claude-opus-5"
 # 무료 사용량 제공 모델 후보. 구글이 모델명을 바꾸면 앞의 것부터 순서대로 시도한다.
@@ -17,10 +17,20 @@ GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
 
-BASE_SYSTEM = f"""당신은 네이버 블로그 전문 작가입니다.
-사용자가 준 키워드와 희망 내용으로 네이버 검색 상위노출에 최적화된 블로그 글을 작성합니다.
 
-{NAVER_SEO_GUIDE}
+def _base_system(content_type: str, target_chars: int | None) -> str:
+    kind = "카페" if content_type == "cafe" else "블로그"
+    length = ""
+    if target_chars:
+        length = (
+            f"\n\n## 글자수 목표 (반드시 준수)\n본문 분량은 공백 포함 한글 기준 "
+            f"약 {target_chars}자로 작성합니다. (±10% 이내로 맞춥니다)"
+        )
+    return f"""당신은 네이버 {kind} 전문 작가입니다.
+사용자가 준 키워드와 희망 내용으로 네이버 검색 상위노출에 최적화된 {kind} 글을 작성합니다.
+
+{get_guide(content_type)}
+{length}
 
 {OUTPUT_FORMAT_GUIDE}
 """.strip()
@@ -46,13 +56,16 @@ def _style_text(style_samples: list[str] | None) -> str | None:
     return STYLE_SYSTEM_TEMPLATE.format(samples=joined)
 
 
-def _build_system(style_samples: list[str] | None) -> list[dict] | str:
+def _build_system(
+    style_samples: list[str] | None, content_type: str, target_chars: int | None
+) -> list[dict] | str:
+    base = _base_system(content_type, target_chars)
     style = _style_text(style_samples)
     if not style:
-        return BASE_SYSTEM
+        return base
     # 스타일 샘플은 요청마다 동일하므로 프롬프트 캐싱으로 비용 절감
     return [
-        {"type": "text", "text": BASE_SYSTEM},
+        {"type": "text", "text": base},
         {"type": "text", "text": style, "cache_control": {"type": "ephemeral"}},
     ]
 
@@ -75,13 +88,19 @@ def stream_post(
     extra: str = "",
     api_key: str | None = None,
     provider: str = "claude",
+    content_type: str = "blog",
+    target_chars: int | None = None,
 ) -> Iterator[str]:
     """글을 생성한다. 텍스트 조각을 순서대로 yield.
 
     provider: "claude" (품질 우수, 유료) 또는 "gemini" (무료 사용량 제공).
+    content_type: "blog" 또는 "cafe".
+    target_chars: 목표 글자수(한글 기준). None이면 기준 분량대로.
     """
     if provider == "gemini":
-        yield _gemini_generate(keyword, brief, style_samples, extra, api_key)
+        yield _gemini_generate(
+            keyword, brief, style_samples, extra, api_key, content_type, target_chars
+        )
         return
 
     if not api_key and not os.environ.get("ANTHROPIC_API_KEY"):
@@ -93,7 +112,7 @@ def stream_post(
     with client.messages.stream(
         model=MODEL,
         max_tokens=16000,
-        system=_build_system(style_samples),
+        system=_build_system(style_samples, content_type, target_chars),
         messages=[{"role": "user", "content": _build_user_prompt(keyword, brief, extra)}],
     ) as stream:
         yield from stream.text_stream
@@ -109,6 +128,8 @@ def _gemini_generate(
     style_samples: list[str] | None,
     extra: str,
     api_key: str | None,
+    content_type: str = "blog",
+    target_chars: int | None = None,
 ) -> str:
     """Google Gemini API로 글 생성 (무료 사용량 제공, aistudio.google.com에서 키 발급)."""
     if not api_key:
@@ -116,7 +137,7 @@ def _gemini_generate(
             "Gemini API 키가 필요합니다. aistudio.google.com 에서 무료로 발급받아 "
             "사이드바에 입력해 주세요."
         )
-    system = BASE_SYSTEM
+    system = _base_system(content_type, target_chars)
     style = _style_text(style_samples)
     if style:
         system = f"{system}\n\n{style}"

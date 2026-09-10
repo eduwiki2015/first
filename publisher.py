@@ -13,9 +13,17 @@
 각 직원이 자기 PC에서 앱을 실행하는 구성에 적합하다.
 """
 
+import random
 import time
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+
+
+def _human_type(page, text: str) -> None:
+    """사람처럼 한 글자씩, 글자마다 조금씩 다른 속도로 타이핑한다."""
+    for ch in text:
+        page.keyboard.type(ch)
+        time.sleep(random.uniform(0.04, 0.13))
 
 LOGIN_URL = "https://nid.naver.com/nidlogin.login"
 WRITE_URL = "https://blog.naver.com/{blog_id}?Redirect=Write&"
@@ -38,14 +46,24 @@ def publish_post(
     반환값: 진행 결과 메시지.
     """
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(locale="ko-KR")
+        # --incognito: 시크릿 모드로 실행해 기존 로그인/쿠키의 영향을 받지 않음
+        browser = p.chromium.launch(headless=False, args=["--incognito"])
+        # 저장된 세션이 전혀 없는 새 컨텍스트(=시크릿 창과 동일)
+        context = browser.new_context(
+            locale="ko-KR",
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+        )
         page = context.new_page()
 
-        # 1) 로그인
+        # 1) 로그인 — 아이디/비밀번호를 사람처럼 한 글자씩 타이핑
         page.goto(LOGIN_URL)
-        page.fill("#id", naver_id)
-        page.fill("#pw", naver_pw)
+        page.click("#id")
+        _human_type(page, naver_id)
+        page.click("#pw")
+        _human_type(page, naver_pw)
         # 로그인 버튼은 네이버가 구조를 자주 바꾸므로 여러 방법을 순서대로 시도
         for selector in ("#log\\.login", "button[type='submit']", ".btn_login"):
             try:
@@ -86,15 +104,17 @@ def publish_post(
         except PWTimeout:
             pass
 
-        # 3) 제목 입력
+        # 3) 제목 입력 — 사람처럼 한 글자씩 타이핑
         frame.click(".se-section-documentTitle", timeout=15000)
-        frame.type(".se-section-documentTitle", title, delay=30)
+        _human_type(page, title)
 
-        # 4) 본문 입력 (문단 단위 입력)
+        # 4) 본문 입력 — 복사붙여넣기가 아니라 실제 타이핑, 문단 단위로 엔터
         frame.click(".se-section-text")
-        for line in body.split("\n"):
-            page.keyboard.insert_text(line)
-            page.keyboard.press("Enter")
+        lines = body.split("\n")
+        for i, line in enumerate(lines):
+            _human_type(page, line)
+            if i < len(lines) - 1:
+                page.keyboard.press("Enter")
 
         # 5) 발행
         if not publish:
