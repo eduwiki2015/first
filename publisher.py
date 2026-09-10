@@ -25,6 +25,119 @@ def _human_type(page, text: str) -> None:
         page.keyboard.type(ch)
         time.sleep(random.uniform(0.04, 0.13))
 
+
+# =====================================================================
+# 권장 방식: 로그인·글쓰기 화면 진입은 '사람'이 직접, 원고 타이핑·꾸미기는 '프로그램'이.
+# 자동 로그인을 하지 않으므로 네이버 보호조치(캡차/2단계)를 유발할 위험이 크게 줄어든다.
+# 블로그·카페 모두 스마트에디터 ONE을 쓰므로 동일하게 동작한다.
+# =====================================================================
+
+TITLE_SELECTOR = ".se-section-documentTitle"
+BODY_SELECTORS = (".se-section-text", ".se-main-container", ".se-content")
+
+
+def _wait_for_editor(page, timeout_seconds: int):
+    """사용자가 글쓰기 화면(스마트에디터)까지 이동할 때까지 기다린다.
+
+    에디터 제목칸이 나타난 프레임을 반환. 시간 초과 시 None.
+    """
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            for fr in page.frames:
+                try:
+                    if fr.query_selector(TITLE_SELECTOR):
+                        return fr
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        time.sleep(2)
+    return None
+
+
+def _dismiss_popups(frame) -> None:
+    """이전 글 이어쓰기 팝업, 도움말 패널 등을 닫는다."""
+    for sel in (".se-popup-button-cancel", ".se-help-panel-close-button"):
+        try:
+            frame.click(sel, timeout=3000)
+        except PWTimeout:
+            pass
+
+
+def _focus_body(frame) -> None:
+    for sel in BODY_SELECTORS:
+        try:
+            frame.click(sel, timeout=3000)
+            return
+        except PWTimeout:
+            continue
+
+
+def _type_body_with_formatting(frame, page, body: str) -> None:
+    """본문을 타이핑하면서 소제목은 굵게, 문단 사이는 여백을 준다."""
+    _focus_body(frame)
+    lines = body.split("\n")
+    for i, raw in enumerate(lines):
+        line = raw.rstrip()
+        if line.startswith("## "):  # 소제목 → 굵게
+            heading = line[3:].strip()
+            page.keyboard.press("Control+b")
+            _human_type(page, heading)
+            page.keyboard.press("Control+b")
+        elif line.startswith("[이미지") or line.startswith("[사진"):
+            _human_type(page, f"📷 {line}  ← 여기에 사진을 넣어 주세요")
+        else:
+            _human_type(page, line)
+        if i < len(lines) - 1:
+            page.keyboard.press("Enter")
+
+
+def write_with_manual_login(
+    title: str,
+    body: str,
+    start_url: str = "https://blog.naver.com",
+    session_state=None,
+    timeout_seconds: int = 600,
+) -> str:
+    """브라우저를 열어 사용자가 직접 로그인·글쓰기 진입하면, 원고를 자동 타이핑한다.
+
+    로그인/발행은 자동화하지 않는다. 원고 입력 후 브라우저는 열린 채로 두어
+    사용자가 확인·추가 꾸미기 후 직접 발행하도록 한다.
+    """
+    pw = sync_playwright().start()
+    browser = pw.chromium.launch(headless=False, args=["--start-maximized"])
+    context = browser.new_context(locale="ko-KR", no_viewport=True)
+    page = context.new_page()
+    page.goto(start_url)
+
+    frame = _wait_for_editor(page, timeout_seconds)
+    if frame is None:
+        try:
+            browser.close()
+        finally:
+            pw.stop()
+        return (
+            "시간이 초과됐습니다(10분). 브라우저에서 로그인 후 '글쓰기' 화면까지 "
+            "이동한 상태에서 다시 시도해 주세요."
+        )
+
+    _dismiss_popups(frame)
+    # 제목
+    try:
+        frame.click(TITLE_SELECTOR, timeout=15000)
+        _human_type(page, title)
+    except PWTimeout:
+        pass
+    # 본문 (소제목 굵게 + 문단 여백)
+    _type_body_with_formatting(frame, page, body)
+
+    # 브라우저를 열어둔 채로 반환 (GC 방지를 위해 핸들을 세션에 보관)
+    if session_state is not None:
+        session_state["browser_handles"] = (pw, browser)
+    return "원고 입력 완료! 열린 브라우저에서 확인·꾸미기 후 직접 '발행' 버튼을 눌러 주세요."
+
+
 LOGIN_URL = "https://nid.naver.com/nidlogin.login"
 WRITE_URL = "https://blog.naver.com/{blog_id}?Redirect=Write&"
 

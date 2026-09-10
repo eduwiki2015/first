@@ -253,40 +253,51 @@ with tab_publish:
         st.info("먼저 '글 생성' 탭에서 글을 만들어 주세요.")
     else:
         post = st.session_state["post"]
-        st.markdown(f"**발행할 글:** {post['title']}")
+        st.markdown(f"**입력할 글:** {post['title']}")
 
-        st.warning(
-            "자동 발행은 네이버 정책 위반 소지가 있습니다. 계정 보호를 위해 "
-            "**'초안만 작성'** 모드(발행 직전에 멈추고 사람이 확인 후 발행)를 권장합니다. "
-            "아이디/비밀번호는 저장되지 않으며 이번 실행에만 사용됩니다."
+        st.info(
+            "이 방식은 **자동 로그인을 하지 않습니다.** (보호조치 예방)\n\n"
+            "1. 아래 버튼을 누르면 브라우저 창이 열립니다.\n"
+            "2. 그 창에서 **직접 로그인**하고, **글쓰기 화면(블로그 또는 카페)까지 이동**해 주세요.\n"
+            "3. 글쓰기 화면이 뜨면 프로그램이 **자동으로 제목·본문을 타이핑하고 소제목을 굵게 꾸며** 줍니다.\n"
+            "4. 완성된 글은 직접 확인하고 이미지·태그를 넣은 뒤 **직접 '발행'** 버튼을 누르세요."
         )
 
-        naver_id = st.text_input("네이버 아이디")
-        naver_pw = st.text_input("네이버 비밀번호", type="password")
-        mode = st.radio(
-            "발행 방식",
-            ["초안만 작성 (권장 — 사람이 확인 후 직접 발행)", "자동 발행"],
+        target = st.radio("어디에 쓸까요?", ["블로그", "카페"], horizontal=True)
+        start_url = (
+            "https://blog.naver.com"
+            if target == "블로그"
+            else "https://section.cafe.naver.com/"
         )
 
-        if st.button("네이버 블로그에 작성 시작", type="primary", use_container_width=True):
-            if not naver_id or not naver_pw:
-                st.error("네이버 아이디와 비밀번호를 입력해 주세요.")
-            else:
-                import publisher  # Playwright는 필요할 때만 로드
+        if st.button("브라우저 열고 원고 입력 시작", type="primary", use_container_width=True):
+            import publisher  # Playwright는 필요할 때만 로드
 
-                with st.spinner("브라우저 실행 중... 캡차/2단계 인증이 뜨면 열린 브라우저에서 직접 해결해 주세요."):
-                    try:
-                        result = publisher.publish_post(
-                            naver_id=naver_id,
-                            naver_pw=naver_pw,
-                            title=post["title"],
-                            body=post["body"],
-                            tags=post["tags"],
-                            publish=mode == "자동 발행",
-                        )
-                        st.success(result)
-                    except Exception as e:
-                        st.error(f"발행 실패: {e}")
+            with st.spinner(
+                "브라우저가 열렸습니다. 그 창에서 로그인 후 '글쓰기' 화면까지 이동해 주세요. "
+                "화면이 준비되면 자동으로 입력합니다... (최대 10분 대기)"
+            ):
+                try:
+                    result = publisher.write_with_manual_login(
+                        title=post["title"],
+                        body=post["body"],
+                        start_url=start_url,
+                        session_state=st.session_state,
+                    )
+                    st.success(result)
+                except Exception as e:
+                    st.error(f"실패: {e}")
+
+        if st.session_state.get("browser_handles"):
+            if st.button("브라우저 닫기"):
+                try:
+                    pw, browser = st.session_state["browser_handles"]
+                    browser.close()
+                    pw.stop()
+                except Exception:
+                    pass
+                st.session_state.pop("browser_handles", None)
+                st.success("브라우저를 닫았습니다.")
 
         st.divider()
         st.markdown("**대안: 직접 붙여넣기 (가장 안전)** — 아래 내용을 복사해서 네이버 에디터에 붙여넣으세요.")
