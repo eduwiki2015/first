@@ -1,5 +1,6 @@
 """블로그 글 생성 (Claude 또는 Gemini API)."""
 
+import os
 import re
 import time
 from typing import Iterator
@@ -83,6 +84,11 @@ def stream_post(
         yield _gemini_generate(keyword, brief, style_samples, extra, api_key)
         return
 
+    if not api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise RuntimeError(
+            "Claude API 키가 입력되지 않았습니다. console.anthropic.com 에서 키를 발급받아 "
+            "사이드바에 입력하거나, 무료로 쓰려면 사이드바에서 Gemini를 선택해 주세요."
+        )
     client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
     with client.messages.stream(
         model=MODEL,
