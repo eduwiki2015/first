@@ -46,7 +46,15 @@ def publish_post(
         page.goto(LOGIN_URL)
         page.fill("#id", naver_id)
         page.fill("#pw", naver_pw)
-        page.click("#log\\.login")
+        # 로그인 버튼은 네이버가 구조를 자주 바꾸므로 여러 방법을 순서대로 시도
+        for selector in ("#log\\.login", "button[type='submit']", ".btn_login"):
+            try:
+                page.click(selector, timeout=4000)
+                break
+            except PWTimeout:
+                continue
+        else:
+            page.press("#pw", "Enter")  # 버튼을 못 찾으면 엔터키로 제출
 
         # 캡차/2단계 인증이 뜨면 사용자가 직접 해결할 때까지 대기
         deadline = time.time() + LOGIN_WAIT_SECONDS
