@@ -11,18 +11,20 @@
 <nav class="tabs" aria-label="경기 선택"><button id="men" aria-pressed="true">남자 경기</button><button id="women" aria-pressed="false">여자 경기</button></nav>
 <div id="teams" class="teams"></div>
 <div class="result" id="result" role="status" aria-live="polite">팀 버튼을 누르면<br><strong>다음 주자의 미션 공개!</strong></div>
-<p class="note">갈 때 20m는 미션, 돌아올 때 20m는 달리기. 반환점 응원은 달려가서 “우리 팀 파이팅!” 3번 후 복귀합니다. 한발 뛰기는 중간에 발을 바꿔도 됩니다. 몸에 부담되는 미션은 시작 전에 변경하세요.</p>
+<p class="note">갈 때 20m는 미션, 돌아올 때 20m는 달리기. 반환점 응원은 달려가서 “우리 팀 파이팅!” 3번 후 복귀합니다. 코끼리코는 출발선에서 7바퀴를 돈 뒤 균형을 잡고 왕복 달리기합니다. 어지러우면 출발하지 말고 진행자에게 알려주세요. 한발 뛰기는 중간에 발을 바꿔도 됩니다. 몸에 부담되는 미션은 시작 전에 변경하세요.</p>
 <details id="settings"><summary>남자·여자 미션 확인 및 변경</summary><p class="note">한 줄에 하나씩 적으세요. 매번 해당 경기의 전체 후보에서 같은 확률로 추첨하며, 중복이 가능합니다. 적용하면 모든 추첨 기록이 초기화됩니다.</p><label for="missions-men">남자 미션 후보</label><textarea id="missions-men" maxlength="1000"></textarea><label for="missions-women">여자 미션 후보</label><textarea id="missions-women" maxlength="1000"></textarea><button id="save" class="secondary">미션 적용하고 전체 초기화</button><p id="error" class="error" role="alert"></p></details>
 <footer><button id="home" class="secondary">처음으로 · 전체 추첨 초기화</button><p class="note">선택한 미션은 유지하고, 남자·여자 양 팀의 추첨 기록을 지웁니다.</p><button id="reset" class="secondary">현재 경기만 다시 뽑기</button><p class="note">진행자 휴대폰 한 대로 사용하세요. 기록은 이 기기의 브라우저에만 저장되며 다른 휴대폰과 공유되지 않습니다.</p><p id="storage" class="error"></p></footer>
 </main><script>
 'use strict';
 const KEY='sports-draw-v2';
-const defaults={men:['오리걸음','뒤로 뛰기','한발로 뛰기','토끼뜀'],women:['머리 위 하트 걷기','만세 걷기','팔 돌리며 걷기','머리 위 박수 걷기','반환점 응원']};
+const MISSION_REVISION=3;
+const defaults={men:['오리걸음','뒤로 뛰기','한발로 뛰기','토끼뜀','코끼리코 7바퀴 후 출발'],women:['머리 위 하트 걷기','만세 걷기','팔 돌리며 걷기','머리 위 박수 걷기','반환점 응원']};
 const empty=()=>({men:{A:[],B:[]},women:{A:[],B:[]}});
 let state={missions:{men:[...defaults.men],women:[...defaults.women]},round:'men',draws:empty()};
 function validPool(p){return Array.isArray(p)&&p.length>=1&&p.length<=20&&new Set(p).size===p.length&&p.every(x=>typeof x==='string'&&x.trim().length>0&&x.length<=50);}
 function valid(s){return s && ['men','women'].includes(s.round)&&['men','women'].every(r=>validPool(s.missions?.[r])&&['A','B'].every(t=>Array.isArray(s.draws?.[r]?.[t])&&s.draws[r][t].length<=5&&s.draws[r][t].every(x=>s.missions[r].includes(x))));}
 try{const saved=JSON.parse(localStorage.getItem(KEY));if(valid(saved))state=saved;}catch(e){document.getElementById('storage').textContent='이 브라우저에서는 기록을 복원할 수 없습니다. 페이지를 닫지 말고 진행하세요.';}
+if(state.missionRevision!==MISSION_REVISION){if(JSON.stringify(state.missions.men)===JSON.stringify(defaults.men.slice(0,4)))state.missions.men.push(defaults.men[4]);state.missionRevision=MISSION_REVISION;persist();}
 function persist(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){document.getElementById('storage').textContent='기록 저장이 불가능합니다. 페이지를 닫으면 기록이 사라질 수 있습니다.';}}
 function index(n){const a=new Uint32Array(1),limit=4294967296-(4294967296%n);do{crypto.getRandomValues(a);}while(a[0]>=limit);return a[0]%n;}
 function announce(label,mission){const box=document.getElementById('result');box.replaceChildren(document.createTextNode(label));const strong=document.createElement('strong');strong.textContent=mission;box.append(strong);}
